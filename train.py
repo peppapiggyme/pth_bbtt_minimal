@@ -4,6 +4,14 @@ import json
 import math
 import numpy as np
 import time
+from itertools import cycle
+
+# Data analysis libraries
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
+from sklearn.multiclass import OneVsRestClassifier
+from scipy import interp
+from sklearn.metrics import roc_auc_score
 
 # PyTorch
 import torch
@@ -23,8 +31,8 @@ import nn_utils
 
 nn_utils.seed_everything(42)
 
-import nn_inputs
-import nn_models
+from nn_inputs import *
+from nn_models import *
 
 def train():
     # Ntuples
@@ -32,12 +40,11 @@ def train():
         "NonRes_1p0" : "/scratchfs/atlas/bowenzhang/ML/ntuple/NonRes_1p0.root",
     }
 
-    mapBkgs = {
+    mapMCBkgs = {
         # "NonRes_10p0" : "/scratchfs/atlas/bowenzhang/ML/ntuple/NonRes_10p0.root",
         "TTbar" : "/scratchfs/atlas/bowenzhang/ML/ntuple/TTbar.root", 
         "Zjets" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Zjets.root", 
         "Diboson" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Diboson.root", 
-        "Fake" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Fake.root", 
         "Htautau" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Htautau.root", 
         "SingleTop" : "/scratchfs/atlas/bowenzhang/ML/ntuple/SingleTop.root", 
         "ttH" : "/scratchfs/atlas/bowenzhang/ML/ntuple/ttH.root", 
@@ -45,28 +52,32 @@ def train():
         "Wjets" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Wjets.root", 
     }
 
+    mapFakeBkgs = {
+        "Fake" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Fake.root", 
+    }
+    
     lNtuplesOdd = list()
     lNtuplesEven = list()
 
     for sTreeName, sFileName in mapSigs.items():
-        lNtuplesOdd.append(
-            nn_inputs.Ntuple(sFileName, sTreeName, nn_inputs.Config_DNN_Odd(nn_inputs.CategorySB.SIG)))
-    for sTreeName, sFileName in mapBkgs.items():
-        lNtuplesOdd.append(
-            nn_inputs.Ntuple(sFileName, sTreeName, nn_inputs.Config_DNN_Odd(nn_inputs.CategorySB.BKG)))
+        lNtuplesOdd.append(Ntuple(sFileName, sTreeName, Config_DNN_Odd(CategorySB.SIG)))
+    for sTreeName, sFileName in mapMCBkgs.items():
+        lNtuplesOdd.append(Ntuple(sFileName, sTreeName, Config_DNN_Odd(CategorySB.BKG_MC)))
+    for sTreeName, sFileName in mapFakeBkgs.items():
+        lNtuplesOdd.append(Ntuple(sFileName, sTreeName, Config_DNN_Odd(CategorySB.BKG_FAKE)))
 
     for sTreeName, sFileName in mapSigs.items():
-        lNtuplesEven.append(
-            nn_inputs.Ntuple(sFileName, sTreeName, nn_inputs.Config_DNN_Even(nn_inputs.CategorySB.SIG)))
-    for sTreeName, sFileName in mapBkgs.items():
-        lNtuplesEven.append(
-            nn_inputs.Ntuple(sFileName, sTreeName, nn_inputs.Config_DNN_Even(nn_inputs.CategorySB.BKG)))
+        lNtuplesEven.append(Ntuple(sFileName, sTreeName, Config_DNN_Even(CategorySB.SIG)))
+    for sTreeName, sFileName in mapMCBkgs.items():
+        lNtuplesEven.append(Ntuple(sFileName, sTreeName, Config_DNN_Even(CategorySB.BKG_MC)))
+    for sTreeName, sFileName in mapFakeBkgs.items():
+        lNtuplesEven.append(Ntuple(sFileName, sTreeName, Config_DNN_Even(CategorySB.BKG_FAKE)))
 
     # Odd or Even
     lNtuples = lNtuplesOdd
 
     # PyTorch DataLoaders
-    cArrays = nn_inputs.InputArrays(lNtuples)
+    cArrays = InputArrays(lNtuples)
     nSize = len(cArrays.weight_vec())
     fSplitVal = 0.2
     nSplitVal = int(np.floor((1 - fSplitVal) * nSize))
@@ -76,31 +87,34 @@ def train():
     
     cSamplerTrain = SubsetRandomSampler(lIndicesTrain)
     cSamplerVal = SubsetRandomSampler(lIndicesVal)
-    cDataset = nn_inputs.InputDataset(cArrays)
+    cDataset = InputDataset(cArrays)
     cLoaderTrain = DataLoader(cDataset, batch_size=64, sampler=cSamplerTrain)
     cLoaderVal = DataLoader(cDataset, batch_size=64, sampler=cSamplerVal)
 
-    cArraysTest = nn_inputs.InputArrays(lNtuplesEven)
-    cDatasetTest = nn_inputs.InputDataset(cArraysTest)
+    cArraysTest = InputArrays(lNtuplesEven)
+    cDatasetTest = InputDataset(cArraysTest)
     cLoaderTest = DataLoader(cDatasetTest, batch_size=64, shuffle=True)
+
+    print(cArraysTest.weight_vec()[cArraysTest.target_vec()==0].sum())
+    print(cArraysTest.weight_vec()[cArraysTest.target_vec()==1].sum())
 
     print(cArrays.feature_vec()[:2])
     print(cArraysTest.feature_vec()[:2])
 
     # NN Model
-    net = nn_models.BBTT_DNN().to(device)
+    net = BBTT_DNN().to(device)
     print(net)
     params = list(net.parameters())
     print(len(params))
     print([p.size() for p in params])
 
     # 
-    criterion = nn.NLLLoss(weight=torch.Tensor([1, 200]), reduction='none')
-    optimizer = optim.SGD(net.parameters(), lr=0.1)
-    # optimizer = optim.SGD(net.parameters(), lr=0.1, weight_decay=1e-5, momentum=0.9, nesterov=True)
+    criterion = nn.NLLLoss(weight=torch.Tensor([5e-2, 100]), reduction='none')
+    # optimizer = optim.SGD(net.parameters(), lr=0.1)
+    optimizer = optim.SGD(net.parameters(), lr=0.1, weight_decay=1e-5, momentum=0.9, nesterov=True)
 
     # Training
-    for epoch in range(100):  # loop over the dataset multiple times
+    for epoch in range(1):  # loop over the dataset multiple times
         print(f"Epoch [{epoch}]")
         
         loss_train = 0.0
@@ -192,6 +206,32 @@ def train():
               ", Acc PNN RAW = Te %.6f" % (100*acc_test_pnn_raw/tot_test_raw))
 
     print('Finished Training')
+
+    # Plotting ROC
+    with torch.no_grad():
+        scores = net(cArraysTest.feature_vec())
+        signal_score = scores[:,1]
+        # fpr_raw, tpr_raw, _ = roc_curve(cArraysTest.target_vec(), signal_score.numpy())
+        fpr_wtd, tpr_wtd, _ = roc_curve(cArraysTest.target_vec(), signal_score.numpy(), sample_weight=cArraysTest.weight_vec())
+        fpr_bdt, tpr_bdt, _ = roc_curve(cArraysTest.target_vec(), cArraysTest.other_vec()[:,0], sample_weight=cArraysTest.weight_vec())
+        fpr_pnn, tpr_pnn, _ = roc_curve(cArraysTest.target_vec(), cArraysTest.other_vec()[:,1], sample_weight=cArraysTest.weight_vec())
+        # TODO need a post-processing of the fpr, tpr to calculate AUC
+        # roc_auc = auc(fpr_wtd, tpr_wtd)
+        print(len(fpr_wtd), len(tpr_wtd))
+        plt.figure(figsize=(6, 6))
+        lw = 2
+        # plt.plot(fpr_raw, tpr_raw, color='darkgreen', lw=lw, label='Raw (%0.2f)' % roc_auc)
+        plt.plot(fpr_wtd, tpr_wtd, color='darkorange', lw=lw, label="Weighted")
+        plt.plot(fpr_bdt, tpr_bdt, color='darkred', lw=lw, label="BDT")
+        plt.plot(fpr_pnn, tpr_pnn, color='darkblue', lw=lw, label="PNN")
+        plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+        plt.xlim([0.0, 1.05])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver operating characteristic')
+        plt.legend(loc="lower right")
+        plt.savefig("../test.png")
 
 
 train()

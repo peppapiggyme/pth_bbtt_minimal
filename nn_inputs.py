@@ -35,7 +35,8 @@ import nn_utils
 
 class CategorySB(object):
     SIG = 0
-    BKG = 1
+    BKG_MC = 1
+    BKG_FAKE = 2
 
 
 class Config(object):
@@ -104,10 +105,12 @@ class Config_DNN(Config):
         super().__init__(category)
         self.features = [b"mHH", b"mMMC", b"mBB", b"dRTauTau", b"dRBB"]
         self.weights = [b"weight"]
-        self.selVars = [b"is_sr", b"event_number"]
+        self.selVars = [b"is_sr", b"is_fake_cr", b"event_number"]
         self.others = [b"SMBDT", b"PNN1p0"]
     
     def sel_vec(self, mapSelVars):
+        if self.category == CategorySB.BKG_FAKE:
+            return mapSelVars[b"is_fake_cr"]
         return mapSelVars[b"is_sr"]
 
     def features_vec(self, mapFeatures):
@@ -116,7 +119,7 @@ class Config_DNN(Config):
     def target_vec(self, mapFeatures):
         if self.category == CategorySB.SIG:
             return np.ones(mapFeatures[self.features[-1]].shape[0], dtype=np.long)
-        elif self.category == CategorySB.BKG:
+        elif self.category == CategorySB.BKG_MC or self.category == CategorySB.BKG_FAKE:
             return np.zeros(mapFeatures[self.features[-1]].shape[0], dtype=np.long)
         else:
             raise RuntimeError(f"Category [{self.category}] not defined")
@@ -276,7 +279,7 @@ def unit_test():
         lNtuples.append(Ntuple(sFileName, sTreeName, Config_DNN_Odd(CategorySB.SIG)))
 
     for sTreeName, sFileName in mapBkgs.items():
-        lNtuples.append(Ntuple(sFileName, sTreeName, Config_DNN_Odd(CategorySB.BKG)))
+        lNtuples.append(Ntuple(sFileName, sTreeName, Config_DNN_Odd(CategorySB.BKG_MC)))
 
     ia = InputArrays(lNtuples)
 
