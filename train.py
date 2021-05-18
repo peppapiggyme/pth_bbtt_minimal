@@ -1,3 +1,19 @@
+"""
+o------o
+| NOTE |
+o------o
+
+* 
+
+o------o
+| TODO |
+o------o
+
+* Class balance: reweight based on ?, now just scale factors [5e-2, 100] -> O(nSig)
+
+
+"""
+
 # Standard libraries
 import os
 import json
@@ -5,13 +21,10 @@ import math
 import numpy as np
 import time
 from itertools import cycle
+import collections
 
 # Data analysis libraries
-import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
-from sklearn.multiclass import OneVsRestClassifier
-from scipy import interp
-from sklearn.metrics import roc_auc_score
 
 # PyTorch
 import torch
@@ -34,7 +47,11 @@ nn_utils.seed_everything(42)
 from nn_inputs import *
 from nn_models import *
 
+
 def train():
+
+    # -------------------------------------------------------------------------
+
     # Ntuples
     mapSigs = {
         "NonRes_1p0" : "/scratchfs/atlas/bowenzhang/ML/ntuple/NonRes_1p0.root",
@@ -43,38 +60,53 @@ def train():
     mapMCBkgs = {
         # "NonRes_10p0" : "/scratchfs/atlas/bowenzhang/ML/ntuple/NonRes_10p0.root",
         "TTbar" : "/scratchfs/atlas/bowenzhang/ML/ntuple/TTbar.root", 
-        "Zjets" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Zjets.root", 
-        "Diboson" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Diboson.root", 
-        "Htautau" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Htautau.root", 
         "SingleTop" : "/scratchfs/atlas/bowenzhang/ML/ntuple/SingleTop.root", 
+        "Zjets" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Zjets.root", 
+        "Wjets" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Wjets.root", 
+        "Diboson" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Diboson.root", 
+        "ttV" : "/scratchfs/atlas/bowenzhang/ML/ntuple/ttV.root", 
         "ttH" : "/scratchfs/atlas/bowenzhang/ML/ntuple/ttH.root", 
         "VH" : "/scratchfs/atlas/bowenzhang/ML/ntuple/VH.root", 
-        "Wjets" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Wjets.root", 
+        "Htautau" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Htautau.root", 
     }
 
     mapFakeBkgs = {
         "Fake" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Fake.root", 
     }
-    
+
+    # Magic variables
+
+    NEPOCH = 50
+    BATCH_SIZE = 256
+
+    ConfigOdd = Config_GNN_Odd
+    ConfigEven = Config_GNN_Even
+
+    # Odd or Even for *Training*
     lNtuplesOdd = list()
     lNtuplesEven = list()
-
-    for sTreeName, sFileName in mapSigs.items():
-        lNtuplesOdd.append(Ntuple(sFileName, sTreeName, Config_DNN_Odd(CategorySB.SIG)))
-    for sTreeName, sFileName in mapMCBkgs.items():
-        lNtuplesOdd.append(Ntuple(sFileName, sTreeName, Config_DNN_Odd(CategorySB.BKG_MC)))
-    for sTreeName, sFileName in mapFakeBkgs.items():
-        lNtuplesOdd.append(Ntuple(sFileName, sTreeName, Config_DNN_Odd(CategorySB.BKG_FAKE)))
-
-    for sTreeName, sFileName in mapSigs.items():
-        lNtuplesEven.append(Ntuple(sFileName, sTreeName, Config_DNN_Even(CategorySB.SIG)))
-    for sTreeName, sFileName in mapMCBkgs.items():
-        lNtuplesEven.append(Ntuple(sFileName, sTreeName, Config_DNN_Even(CategorySB.BKG_MC)))
-    for sTreeName, sFileName in mapFakeBkgs.items():
-        lNtuplesEven.append(Ntuple(sFileName, sTreeName, Config_DNN_Even(CategorySB.BKG_FAKE)))
-
-    # Odd or Even
     lNtuples = lNtuplesOdd
+
+    # Which NN
+    NeuralNetwork = BBTT_GATNN
+
+    # -------------------------------------------------------------------------
+
+    # Odd <-> Even splitting, can be extended to multiple folds
+
+    for sTreeName, sFileName in mapSigs.items():
+        lNtuplesOdd.append(Ntuple(sFileName, sTreeName, ConfigOdd(CategorySB.SIG)))
+    for sTreeName, sFileName in mapMCBkgs.items():
+        lNtuplesOdd.append(Ntuple(sFileName, sTreeName, ConfigOdd(CategorySB.BKG_MC)))
+    for sTreeName, sFileName in mapFakeBkgs.items():
+        lNtuplesOdd.append(Ntuple(sFileName, sTreeName, ConfigOdd(CategorySB.BKG_FAKE)))
+
+    for sTreeName, sFileName in mapSigs.items():
+        lNtuplesEven.append(Ntuple(sFileName, sTreeName, ConfigEven(CategorySB.SIG)))
+    for sTreeName, sFileName in mapMCBkgs.items():
+        lNtuplesEven.append(Ntuple(sFileName, sTreeName, ConfigEven(CategorySB.BKG_MC)))
+    for sTreeName, sFileName in mapFakeBkgs.items():
+        lNtuplesEven.append(Ntuple(sFileName, sTreeName, ConfigEven(CategorySB.BKG_FAKE)))
 
     # PyTorch DataLoaders
     cArrays = InputArrays(lNtuples)
@@ -88,12 +120,12 @@ def train():
     cSamplerTrain = SubsetRandomSampler(lIndicesTrain)
     cSamplerVal = SubsetRandomSampler(lIndicesVal)
     cDataset = InputDataset(cArrays)
-    cLoaderTrain = DataLoader(cDataset, batch_size=64, sampler=cSamplerTrain)
-    cLoaderVal = DataLoader(cDataset, batch_size=64, sampler=cSamplerVal)
+    cLoaderTrain = DataLoader(cDataset, batch_size=BATCH_SIZE, sampler=cSamplerTrain)
+    cLoaderVal = DataLoader(cDataset, batch_size=BATCH_SIZE, sampler=cSamplerVal)
 
     cArraysTest = InputArrays(lNtuplesEven)
     cDatasetTest = InputDataset(cArraysTest)
-    cLoaderTest = DataLoader(cDatasetTest, batch_size=64, shuffle=True)
+    cLoaderTest = DataLoader(cDatasetTest, batch_size=BATCH_SIZE, shuffle=True)
 
     print(cArraysTest.weight_vec()[cArraysTest.target_vec()==0].sum())
     print(cArraysTest.weight_vec()[cArraysTest.target_vec()==1].sum())
@@ -102,19 +134,27 @@ def train():
     print(cArraysTest.feature_vec()[:2])
 
     # NN Model
-    net = BBTT_DNN().to(device)
-    print(net)
-    params = list(net.parameters())
+    cNet = NeuralNetwork().to(device)
+    print(cNet)
+    params = list(cNet.parameters())
     print(len(params))
     print([p.size() for p in params])
 
     # 
-    criterion = nn.NLLLoss(weight=torch.Tensor([5e-2, 100]), reduction='none')
-    # optimizer = optim.SGD(net.parameters(), lr=0.1)
-    optimizer = optim.SGD(net.parameters(), lr=0.1, weight_decay=1e-5, momentum=0.9, nesterov=True)
+    cCriterion = nn.NLLLoss(reduction='none')
+    fLearningRate = 0.01
+    # cOptimizer = optim.SGD(cNet.parameters(), lr=0.1)
+    # cOptimizer = optim.SGD(cNet.parameters(), lr=fLearningRate, momentum=0.9, nesterov=True)
+    cOptimizer = optim.Adam(cNet.parameters(), lr=fLearningRate)
+
+    lValLosses = list()
+    fMinValLoss = 1e9
+    iMinValLoss = 100
+    nPatience = 4
+    nPatienceCount = 4
 
     # Training
-    for epoch in range(1):  # loop over the dataset multiple times
+    for epoch in range(NEPOCH):  # loop over the dataset multiple times
         print(f"Epoch [{epoch}]")
         
         loss_train = 0.0
@@ -124,114 +164,119 @@ def train():
         tot_train_raw = 0.0
         
         loss_val = 0.0
-        acc_val_bdt = 0.0
-        acc_val_pnn = 0.0
+        acc_val_BDT = 0.0
+        acc_val_PNN = 0.0
         acc_val = 0.0
         tot_val = 0.0
 
         loss_test = 0.0
-        acc_test_bdt = 0.0
-        acc_test_pnn = 0.0
+        acc_test_BDT = 0.0
+        acc_test_PNN = 0.0
         acc_test = 0.0
         tot_test = 0.0
         acc_test_raw = 0.0
-        acc_test_bdt_raw = 0.0
-        acc_test_pnn_raw = 0.0
+        acc_test_BDT_raw = 0.0
+        acc_test_PNN_raw = 0.0
         tot_test_raw = 0.0
         
+        print("Train")
         for i, (x, y, w, _) in enumerate(cLoaderTrain):
-            optimizer.zero_grad()
+            cOptimizer.zero_grad()
 
-            scores = net(x)
-            y_pred = scores.argmax(dim=-1)
-            loss = criterion(scores, y)
-            loss = loss.mul(w)
-            loss.mean().backward()
-            optimizer.step()
+            cScores = cNet(x)
+            vPred = cScores.argmax(dim=-1)
+            vLoss = cCriterion(cScores, y)
+            vLoss = vLoss.mul(w)
+            vLoss.mean().backward()
+            cOptimizer.step()
 
-            loss_train += loss.sum().item()
-            acc_train += (y_pred == y).float().mul(w).sum()
+            loss_train += vLoss.sum().item()
+            acc_train += (vPred == y).float().mul(w).sum()
             tot_train += w.sum()
-            acc_train_raw += (y_pred == y).sum().float()
+            acc_train_raw += (vPred == y).sum().float()
             tot_train_raw += y.size()[0]
         
+        print("Validation")
         with torch.no_grad():
             for i, (x, y, w, other) in enumerate(cLoaderVal):
-                scores = net(x)
-                y_pred = scores.argmax(dim=-1)
-                loss = criterion(scores, y)
-                loss = loss.mul(w)
+                cScores = cNet(x)
+                vPred = cScores.argmax(dim=-1)
+                vLoss = cCriterion(cScores, y)
+                vLoss = vLoss.mul(w)
 
-                y_pred_bdt = torch.round(other[:,0]*0.5 + 0.5).long()
-                y_pred_pnn = torch.round(other[:,1]).long()
+                vPred_BDT = torch.round(other[:,0]*0.5 + 0.5).long()
+                vPred_PNN = torch.round(other[:,1]).long()
 
-                loss_val += loss.sum().item() 
-                acc_val += (y_pred == y).float().mul(w).sum()
-                acc_val_bdt += (y_pred_bdt == y).float().mul(w).sum()
-                acc_val_pnn += (y_pred_pnn == y).float().mul(w).sum()
+                loss_val += vLoss.sum().item() 
+                acc_val += (vPred == y).float().mul(w).sum()
+                acc_val_BDT += (vPred_BDT == y).float().mul(w).sum()
+                acc_val_PNN += (vPred_PNN == y).float().mul(w).sum()
                 tot_val += w.sum()
 
+            print("Test")
             for i, (x, y, w, other) in enumerate(cLoaderTest):
-                scores = net(x)
-                y_pred = scores.argmax(dim=-1)
-                loss = criterion(scores, y)
-                loss = loss.mul(w)
+                vScores = cNet(x)
+                vPred = vScores.argmax(dim=-1)
+                vLoss = cCriterion(vScores, y)
+                vLoss = vLoss.mul(w)
 
-                y_pred_bdt = torch.round(other[:,0]*0.5 + 0.5).long()
-                y_pred_pnn = torch.round(other[:,1]).long()
+                vPred_BDT = torch.round(other[:,0]*0.5 + 0.5).long()
+                vPred_PNN = torch.round(other[:,1]).long()
 
-                loss_test += loss.sum().item() 
-                acc_test += (y_pred == y).float().mul(w).sum()
-                acc_test_bdt += (y_pred_bdt == y).float().mul(w).sum()
-                acc_test_pnn += (y_pred_pnn == y).float().mul(w).sum()
+                loss_test += vLoss.sum().item() 
+                acc_test += (vPred == y).float().mul(w).sum()
+                acc_test_BDT += (vPred_BDT == y).float().mul(w).sum()
+                acc_test_PNN += (vPred_PNN == y).float().mul(w).sum()
                 tot_test += w.sum()
-                acc_test_raw += (y_pred == y).sum().float()
-                acc_test_bdt_raw += (y_pred_bdt == y).sum().float()
-                acc_test_pnn_raw += (y_pred_pnn == y).sum().float()
+                acc_test_raw += (vPred == y).sum().float()
+                acc_test_BDT_raw += (vPred_BDT == y).sum().float()
+                acc_test_PNN_raw += (vPred_PNN == y).sum().float()
                 tot_test_raw += y.size()[0]
 
         print("> Loss = Tr %.6f Va %.6f" % (100*loss_train/tot_train, 100*loss_val/tot_val),
               ", Acc = Tr %.6f Va %.6f" % (100*acc_train/tot_train, 100*acc_val/tot_val),
-              ", Acc BDT = Va %.6f" % (100*acc_val_bdt/tot_val),
-              ", Acc PNN = Va %.6f" % (100*acc_val_pnn/tot_val))
+              ", Acc BDT = Va %.6f" % (100*acc_val_BDT/tot_val),
+              ", Acc PNN = Va %.6f" % (100*acc_val_PNN/tot_val))
 
         print("> Loss = Tr %.6f Te %.6f" % (100*loss_train/tot_train, 100*loss_test/tot_test),
               ", Acc = Tr %.6f Te %.6f" % (100*acc_train/tot_train, 100*acc_test/tot_test),
-              ", Acc BDT = Te %.6f" % (100*acc_test_bdt/tot_test),
-              ", Acc PNN = Te %.6f" % (100*acc_test_pnn/tot_test))
+              ", Acc BDT = Te %.6f" % (100*acc_test_BDT/tot_test),
+              ", Acc PNN = Te %.6f" % (100*acc_test_PNN/tot_test))
 
         print("> Loss = Tr %.6f Te %.6f" % (100*loss_train/tot_train, 100*loss_test/tot_test),
               ", Acc RAW = Tr %.6f Te %.6f" % (100*acc_train_raw/tot_train_raw, 100*acc_test_raw/tot_test_raw),
-              ", Acc BDT RAW = Te %.6f" % (100*acc_test_bdt_raw/tot_test_raw),
-              ", Acc PNN RAW = Te %.6f" % (100*acc_test_pnn_raw/tot_test_raw))
+              ", Acc BDT RAW = Te %.6f" % (100*acc_test_BDT_raw/tot_test_raw),
+              ", Acc PNN RAW = Te %.6f" % (100*acc_test_PNN_raw/tot_test_raw))
+
+        if loss_val < fMinValLoss:
+            fMinValLoss = loss_val
+            iMinValLoss = len(lValLosses)
+        else:
+            nPatienceCount -= 1
+
+        if nPatienceCount == 0:
+            fLearningRate = fLearningRate * 0.8
+            nPatienceCount = nPatience
+
+        lValLosses.append(loss_val)
+
+        print ("> Current LR = %.6f, Minimal loss at epoch %d" % (fLearningRate, iMinValLoss))
 
     print('Finished Training')
 
     # Plotting ROC
     with torch.no_grad():
-        scores = net(cArraysTest.feature_vec())
-        signal_score = scores[:,1]
-        # fpr_raw, tpr_raw, _ = roc_curve(cArraysTest.target_vec(), signal_score.numpy())
-        fpr_wtd, tpr_wtd, _ = roc_curve(cArraysTest.target_vec(), signal_score.numpy(), sample_weight=cArraysTest.weight_vec())
-        fpr_bdt, tpr_bdt, _ = roc_curve(cArraysTest.target_vec(), cArraysTest.other_vec()[:,0], sample_weight=cArraysTest.weight_vec())
-        fpr_pnn, tpr_pnn, _ = roc_curve(cArraysTest.target_vec(), cArraysTest.other_vec()[:,1], sample_weight=cArraysTest.weight_vec())
-        # TODO need a post-processing of the fpr, tpr to calculate AUC
-        # roc_auc = auc(fpr_wtd, tpr_wtd)
-        print(len(fpr_wtd), len(tpr_wtd))
-        plt.figure(figsize=(6, 6))
-        lw = 2
-        # plt.plot(fpr_raw, tpr_raw, color='darkgreen', lw=lw, label='Raw (%0.2f)' % roc_auc)
-        plt.plot(fpr_wtd, tpr_wtd, color='darkorange', lw=lw, label="Weighted")
-        plt.plot(fpr_bdt, tpr_bdt, color='darkred', lw=lw, label="BDT")
-        plt.plot(fpr_pnn, tpr_pnn, color='darkblue', lw=lw, label="PNN")
-        plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
-        plt.xlim([0.0, 1.05])
-        plt.ylim([0.0, 1.05])
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title('Receiver operating characteristic')
-        plt.legend(loc="lower right")
-        plt.savefig("../test.png")
+        cScores = cNet(cArraysTest.feature_vec())
+        cScoresSignal = cScores[:,1]
+        y = cArraysTest.target_vec()
+        w = cArraysTest.weight_vec()
 
+        sTag = "DNNvsBDT"
+        mapCurves = collections.OrderedDict()
+        mapCurves["[new] DNN"] = roc_curve(y, cScoresSignal.numpy(), sample_weight=w)
+        mapCurves["SMHH BDT"] = roc_curve(y, cArraysTest.other_vec()[:,0], sample_weight=w)
+        mapCurves["X500 PNN"] = roc_curve(y, cArraysTest.other_vec()[:,1], sample_weight=w)
+
+        nn_utils.plotROCs(sTag, mapCurves)
 
 train()

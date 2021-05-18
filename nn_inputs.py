@@ -33,11 +33,20 @@ from torch.utils.data import Dataset
 import uproot
 import nn_utils
 
+
+# -----------------------------------------------------------------------------
+# Enums
+# -----------------------------------------------------------------------------
+
 class CategorySB(object):
     SIG = 0
     BKG_MC = 1
     BKG_FAKE = 2
 
+
+# -----------------------------------------------------------------------------
+# Configs -> tell ntuple tool what to do
+# -----------------------------------------------------------------------------
 
 class Config(object):
     def __init__(self, category):
@@ -98,7 +107,18 @@ class Config(object):
                 # fOffSet, fScale = mapFeatures[sFeature].mean(), 0.5 / mapFeatures[sFeature].std()
             # print(sFeature, fOffSet, fScale)
             mapFeatures[sFeature] = np.multiply(np.subtract(mapFeatures[sFeature], fOffSet), fScale)
+    
+    def class_balance(self, vWeight, vTarget, *targs, **kwargs):
+        raise NotImplementedError
 
+    def class_balance_basic(self, vWeights, vTarget, w1, w2):
+        vWeights[vTarget==0] = vWeights[vTarget==0] * w1
+        vWeights[vTarget==1] = vWeights[vTarget==1] * w2
+
+
+# -----------------------------------------------------------------------------
+# Config for DNN
+# -----------------------------------------------------------------------------
 
 class Config_DNN(Config):
     def __init__(self, category):
@@ -106,7 +126,7 @@ class Config_DNN(Config):
         self.features = [b"mHH", b"mMMC", b"mBB", b"dRTauTau", b"dRBB"]
         self.weights = [b"weight"]
         self.selVars = [b"is_sr", b"is_fake_cr", b"event_number"]
-        self.others = [b"SMBDT", b"PNN1p0"]
+        self.others = [b"SMBDT", b"PNN500"]
     
     def sel_vec(self, mapSelVars):
         if self.category == CategorySB.BKG_FAKE:
@@ -127,7 +147,11 @@ class Config_DNN(Config):
     def trans(self, mapFeatures):
         self.trans_standarize(mapFeatures, True)
 
+    def class_balance(self, vWeights, vTarget, *targs, **kwargs):
+        self.class_balance_basic(vWeight, vTarget, targs[0], targs[1])
 
+
+# Odd fold
 class Config_DNN_Odd(Config_DNN):
     def __init__(self, category):
         super().__init__(category)
@@ -137,6 +161,7 @@ class Config_DNN_Odd(Config_DNN):
             np.equal(np.mod(mapSelVars[b"event_number"], 2), 1))
 
 
+# Even fold
 class Config_DNN_Even(Config_DNN):
     def __init__(self, category):
         super().__init__(category)
@@ -145,6 +170,79 @@ class Config_DNN_Even(Config_DNN):
         return np.logical_and(super().sel_vec(mapSelVars), \
             np.equal(np.mod(mapSelVars[b"event_number"], 2), 0))
 
+
+# -----------------------------------------------------------------------------
+# Config for GNN
+# -----------------------------------------------------------------------------
+
+class Config_GNN(Config):
+    def __init__(self, category):
+        """
+        The order matters!
+        """
+        super().__init__(category)
+        self.features = [
+            b"mmc_pt", b"mmc_m", b"mmc_eta", b"mmc_phi", 
+            b"bb_corr_pt", b"bb_corr_m", b"bb_corr_eta", b"bb_corr_phi", 
+            b"tau0_pt", b"tau0_m", b"tau0_eta", b"tau0_phi", 
+            b"tau1_pt", b"tau1_m", b"tau1_eta", b"tau1_phi", 
+            b"b0_pt", b"b0_m", b"b0_eta", b"b0_phi", 
+            b"b1_pt", b"b1_m", b"b1_eta", b"b1_phi", 
+        ]
+        self.weights = [b"weight"]
+        self.selVars = [b"is_sr", b"is_fake_cr", b"event_number"]
+        self.others = [b"SMBDT", B"PNN500"]
+    
+    def sel_vec(self, mapSelVars):
+        if self.category == CategorySB.BKG_FAKE:
+            return mapSelVars[b"is_fake_cr"]
+        return mapSelVars[b"is_sr"]
+
+    def features_vec(self, mapFeatures):
+        for sFeature in self.features:
+            mapFeatures[sFeature] = mapFeatures[sFeature].reshape((-1, 1))
+        return np.concatenate([mapFeatures[f] for f in self.features], axis=1).reshape((-1, 6, 4))
+
+    def target_vec(self, mapFeatures):
+        if self.category == CategorySB.SIG:
+            return np.ones(mapFeatures[self.features[-1]].shape[0], dtype=np.long)
+        elif self.category == CategorySB.BKG_MC or self.category == CategorySB.BKG_FAKE:
+            return np.zeros(mapFeatures[self.features[-1]].shape[0], dtype=np.long)
+        else:
+            raise RuntimeError(f"Category [{self.category}] not defined")
+
+    def trans(self, mapFeatures):
+        for sFeature in self.features:
+            if sFeature.endswith(b"_pt"):
+                mapFeatures[sFeature] = np.log10(mapFeatures[sFeature])
+        self.trans_standarize(mapFeatures, True)
+
+    def class_balance(self, vWeights, vTarget, *targs, **kwargs):
+        self.class_balance_basic(vWeights, vTarget, targs[0], targs[1])
+
+# Odd fold
+class Config_GNN_Odd(Config_GNN):
+    def __init__(self, category):
+        super().__init__(category)
+    
+    def sel_vec(self, mapSelVars):
+        return np.logical_and(super().sel_vec(mapSelVars), \
+            np.equal(np.mod(mapSelVars[b"event_number"], 2), 1))
+
+
+# Even fold
+class Config_GNN_Even(Config_GNN):
+    def __init__(self, category):
+        super().__init__(category)
+    
+    def sel_vec(self, mapSelVars):
+        return np.logical_and(super().sel_vec(mapSelVars), \
+            np.equal(np.mod(mapSelVars[b"event_number"], 2), 0))
+
+
+# -----------------------------------------------------------------------------
+# Ntuple wrapper
+# -----------------------------------------------------------------------------
 
 class Ntuple(object):
     def __init__(self, sFileName, sTreeName, cConfig):
@@ -209,6 +307,7 @@ class Ntuple(object):
         self.vTarget = self.cConfig.target_vec(self.mapFeatures)
         self.vWeight = self.mapWeights[self.cConfig.weights[-1]]
         self.vOthers = self.cConfig.other_vec(self.mapOthers)
+        self.cConfig.class_balance(self.vWeight, self.vTarget, 0.025, 20)
 
     def feature_vec(self):
         return self.vFeatures
@@ -222,6 +321,10 @@ class Ntuple(object):
     def other_vec(self):
         return self.vOthers
 
+
+# -----------------------------------------------------------------------------
+# InputArrays -> Merge arrays from ntuples and port to torch.Tensor
+# -----------------------------------------------------------------------------
 
 class InputArrays(object):
     def __init__(self, lNtuples):
@@ -247,6 +350,10 @@ class InputArrays(object):
     def other_vec(self):
         return self._o_vec
 
+
+# -----------------------------------------------------------------------------
+# InputDataset -> Inherite from PyTorch Dataset, Used by DataLoader
+# -----------------------------------------------------------------------------
 
 class InputDataset(Dataset):
     def __init__(self, cInputArray):
