@@ -127,10 +127,10 @@ class BBTT_GNN(nn.Module):
         self.adj = torch.Tensor([
             [1, 1, 1, 1, 0, 0],  # H
             [1, 1, 0, 0, 1, 1],  # H
-            [1, 0, 1, 0, 0, 0],  # t
-            [1, 0, 0, 1, 0, 0],  # t
-            [0, 1, 0, 0, 1, 0],  # b
-            [0, 1, 0, 0, 0, 1],  # b
+            [1, 0, 1, 1, 0, 0],  # t
+            [1, 0, 1, 1, 0, 0],  # t
+            [0, 1, 0, 0, 1, 1],  # b
+            [0, 1, 0, 0, 1, 1],  # b
         ])
 
         self.hl_0 = nn.Linear(5, nHidden)
@@ -167,7 +167,7 @@ class BBTT_GNN(nn.Module):
 
 
 class BBTT_GATNN(nn.Module):
-    def __init__(self, nIn=4, nHidden=8):
+    def __init__(self, nIn=3, nHidden=8):
         super().__init__()
 
         #    H  H  t  t  b  b 
@@ -209,8 +209,8 @@ def unit_test():
 
     nBatchSize = 10
     x1 = torch.randn(nBatchSize, 5)
-    x2 = torch.randn(nBatchSize, 6, 4)
-    x3 = torch.randn(nBatchSize, 6, 4)
+    x2 = torch.randn(nBatchSize, 6, 3)
+    x3 = torch.randn(nBatchSize, 6, 3)
 
     y1 = dnn(x1)
     y2 = gnn(x2)
