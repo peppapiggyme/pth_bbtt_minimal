@@ -85,10 +85,11 @@ def train():
     # Odd or Even for *Training*
     lNtuplesOdd = list()
     lNtuplesEven = list()
-    lNtuples = lNtuplesOdd
+    lNtuplesTrain = lNtuplesEven
+    lNtuplesTest = lNtuplesOdd
 
     # Which NN
-    NeuralNetwork = BBTT_GATNN
+    NeuralNetwork = BBTT_GNN
 
     # -------------------------------------------------------------------------
 
@@ -109,7 +110,7 @@ def train():
         lNtuplesEven.append(Ntuple(sFileName, sTreeName, ConfigEven(CategorySB.BKG_FAKE)))
 
     # PyTorch DataLoaders
-    cArrays = InputArrays(lNtuples)
+    cArrays = InputArrays(lNtuplesTrain).class_balance_basic()
     nSize = len(cArrays.weight_vec())
     fSplitVal = 0.2
     nSplitVal = int(np.floor((1 - fSplitVal) * nSize))
@@ -123,26 +124,26 @@ def train():
     cLoaderTrain = DataLoader(cDataset, batch_size=BATCH_SIZE, sampler=cSamplerTrain)
     cLoaderVal = DataLoader(cDataset, batch_size=BATCH_SIZE, sampler=cSamplerVal)
 
-    cArraysTest = InputArrays(lNtuplesEven)
+    cArraysTest = InputArrays(lNtuplesTest).class_balance_basic()
     cDatasetTest = InputDataset(cArraysTest)
     cLoaderTest = DataLoader(cDatasetTest, batch_size=BATCH_SIZE, shuffle=True)
 
     print(cArraysTest.weight_vec()[cArraysTest.target_vec()==0].sum())
     print(cArraysTest.weight_vec()[cArraysTest.target_vec()==1].sum())
 
-    print(cArrays.feature_vec()[:2])
-    print(cArraysTest.feature_vec()[:2])
+    print(cArrays.feature_vec()[0])
 
     # NN Model
     cNet = NeuralNetwork().to(device)
     print(cNet)
     params = list(cNet.parameters())
-    print(len(params))
-    print([p.size() for p in params])
+    # print(len(params))
+    # print([p.size() for p in params])
+    print("n Parameters to train: ", sum(p.numel() for p in cNet.parameters() if p.requires_grad))
 
     # 
     cCriterion = nn.NLLLoss(reduction='none')
-    fLearningRate = 0.01
+    fLearningRate = 0.004
     # cOptimizer = optim.SGD(cNet.parameters(), lr=0.1)
     # cOptimizer = optim.SGD(cNet.parameters(), lr=fLearningRate, momentum=0.9, nesterov=True)
     cOptimizer = optim.Adam(cNet.parameters(), lr=fLearningRate)
@@ -150,8 +151,8 @@ def train():
     lValLosses = list()
     fMinValLoss = 1e9
     iMinValLoss = 100
-    nPatience = 4
-    nPatienceCount = 4
+    nPatience = 5
+    nPatienceCount = 5
 
     # Training
     for epoch in range(NEPOCH):  # loop over the dataset multiple times
@@ -180,10 +181,10 @@ def train():
         tot_test_raw = 0.0
         
         print("Train")
-        for i, (x, y, w, _) in enumerate(cLoaderTrain):
+        for i, (x, y, w, other) in enumerate(cLoaderTrain):
             cOptimizer.zero_grad()
 
-            cScores = cNet(x)
+            cScores = cNet(x, other[:,2:])
             vPred = cScores.argmax(dim=-1)
             vLoss = cCriterion(cScores, y)
             vLoss = vLoss.mul(w)
@@ -199,7 +200,7 @@ def train():
         print("Validation")
         with torch.no_grad():
             for i, (x, y, w, other) in enumerate(cLoaderVal):
-                cScores = cNet(x)
+                cScores = cNet(x, other[:,2:])
                 vPred = cScores.argmax(dim=-1)
                 vLoss = cCriterion(cScores, y)
                 vLoss = vLoss.mul(w)
@@ -215,7 +216,7 @@ def train():
 
             print("Test")
             for i, (x, y, w, other) in enumerate(cLoaderTest):
-                vScores = cNet(x)
+                vScores = cNet(x, other[:,2:])
                 vPred = vScores.argmax(dim=-1)
                 vLoss = cCriterion(vScores, y)
                 vLoss = vLoss.mul(w)
@@ -255,7 +256,7 @@ def train():
             nPatienceCount -= 1
 
         if nPatienceCount == 0:
-            fLearningRate = fLearningRate * 0.8
+            fLearningRate = fLearningRate * 0.5
             nPatienceCount = nPatience
 
         lValLosses.append(loss_val)
@@ -266,7 +267,7 @@ def train():
 
     # Plotting ROC
     with torch.no_grad():
-        cScores = cNet(cArraysTest.feature_vec())
+        cScores = cNet(cArraysTest.feature_vec(), cArraysTest.other_vec()[:,2:])
         cScoresSignal = cScores[:,1]
         y = cArraysTest.target_vec()
         w = cArraysTest.weight_vec()

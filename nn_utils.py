@@ -37,6 +37,7 @@ def cached_trans_standarise():
 
     cache = {
         b"mHH": (500000, 2.5e-6),
+        b"mHH_scaled": (500000, 2.5e-6),
         b"mMMC": (125000, 2.5e-5),
         b"mBB": (125000, 2.5e-5),
         b"dRTauTau": (2, 0.5),
@@ -65,6 +66,8 @@ def cached_trans_standarise():
         b"b1_m": (12000, 5e-5), 
         b"b1_eta": (0, 0.5), 
         b"b1_phi": (0, 0.3), 
+        b"MET": (4, 2),
+        b"MET_phi": (0, 0.3), 
     }
 
     return cache

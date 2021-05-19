@@ -92,6 +92,12 @@ class Config(object):
         on the tranformation defined here
         """
         raise NotImplementedError
+
+    def trans_others(self, mapOthers):
+        """
+        might be useful in some cases
+        """
+        raise NotImplementedError
     
     def features_vec_basic(self, mapFeatures):
         for sFeature in self.features:
@@ -107,13 +113,6 @@ class Config(object):
                 # fOffSet, fScale = mapFeatures[sFeature].mean(), 0.5 / mapFeatures[sFeature].std()
             # print(sFeature, fOffSet, fScale)
             mapFeatures[sFeature] = np.multiply(np.subtract(mapFeatures[sFeature], fOffSet), fScale)
-    
-    def class_balance(self, vWeight, vTarget, *targs, **kwargs):
-        raise NotImplementedError
-
-    def class_balance_basic(self, vWeights, vTarget, w1, w2):
-        vWeights[vTarget==0] = vWeights[vTarget==0] * w1
-        vWeights[vTarget==1] = vWeights[vTarget==1] * w2
 
 
 # -----------------------------------------------------------------------------
@@ -147,9 +146,8 @@ class Config_DNN(Config):
     def trans(self, mapFeatures):
         self.trans_standarize(mapFeatures, True)
 
-    def class_balance(self, vWeights, vTarget, *targs, **kwargs):
-        self.class_balance_basic(vWeight, vTarget, targs[0], targs[1])
-
+    def trans_others(self, mapOthers):
+        pass
 
 # Odd fold
 class Config_DNN_Odd(Config_DNN):
@@ -182,16 +180,16 @@ class Config_GNN(Config):
         """
         super().__init__(category)
         self.features = [
-            b"mmc_pt", b"mmc_m", b"mmc_eta", b"mmc_phi", 
-            b"bb_corr_pt", b"bb_corr_m", b"bb_corr_eta", b"bb_corr_phi", 
-            b"tau0_pt", b"tau0_m", b"tau0_eta", b"tau0_phi", 
-            b"tau1_pt", b"tau1_m", b"tau1_eta", b"tau1_phi", 
-            b"b0_pt", b"b0_m", b"b0_eta", b"b0_phi", 
-            b"b1_pt", b"b1_m", b"b1_eta", b"b1_phi", 
+            b"mmc_pt", b"mmc_eta", b"mmc_phi",
+            b"bb_corr_pt", b"bb_corr_eta", b"bb_corr_phi",
+            b"tau0_pt", b"tau0_eta", b"tau0_phi",
+            b"tau1_pt", b"tau1_eta", b"tau1_phi",
+            b"b0_pt", b"b0_eta", b"b0_phi",
+            b"b1_pt", b"b1_eta", b"b1_phi",
         ]
         self.weights = [b"weight"]
         self.selVars = [b"is_sr", b"is_fake_cr", b"event_number"]
-        self.others = [b"SMBDT", B"PNN500"]
+        self.others = [b"SMBDT", B"PNN500", b"mHH", b"mMMC", b"mBB", b"dRTauTau", b"dRBB"]
     
     def sel_vec(self, mapSelVars):
         if self.category == CategorySB.BKG_FAKE:
@@ -201,7 +199,7 @@ class Config_GNN(Config):
     def features_vec(self, mapFeatures):
         for sFeature in self.features:
             mapFeatures[sFeature] = mapFeatures[sFeature].reshape((-1, 1))
-        return np.concatenate([mapFeatures[f] for f in self.features], axis=1).reshape((-1, 6, 4))
+        return np.concatenate([mapFeatures[f] for f in self.features], axis=1).reshape((-1, 6, 3))
 
     def target_vec(self, mapFeatures):
         if self.category == CategorySB.SIG:
@@ -213,12 +211,14 @@ class Config_GNN(Config):
 
     def trans(self, mapFeatures):
         for sFeature in self.features:
-            if sFeature.endswith(b"_pt"):
+            if sFeature.endswith(b"_pt") or sFeature == b"MET":
                 mapFeatures[sFeature] = np.log10(mapFeatures[sFeature])
         self.trans_standarize(mapFeatures, True)
 
-    def class_balance(self, vWeights, vTarget, *targs, **kwargs):
-        self.class_balance_basic(vWeights, vTarget, targs[0], targs[1])
+    def trans_others(self, mapOthers):
+        for sOther in self.others[2:]:
+            fOffSet, fScale = nn_utils.cached_trans_standarise()[sOther]
+            mapOthers[sOther] = np.multiply(np.subtract(mapOthers[sOther], fOffSet), fScale)
 
 # Odd fold
 class Config_GNN_Odd(Config_GNN):
@@ -272,11 +272,11 @@ class Ntuple(object):
         self._getArrays()
 
     def _applySelection(self):
-        for sFeature in self.cConfig.features:
+        for sFeature in set(self.cConfig.features):
             self.mapFeatures[sFeature] = self.mapFeatures[sFeature][self.vSel]
-        for sWeight in self.cConfig.weights:
+        for sWeight in set(self.cConfig.weights):
             self.mapWeights[sWeight] = self.mapWeights[sWeight][self.vSel]
-        for sOther in self.cConfig.others:
+        for sOther in set(self.cConfig.others):
             self.mapOthers[sOther] = self.mapOthers[sOther][self.vSel]
 
     def _applyTranformation(self):
@@ -297,7 +297,8 @@ class Ntuple(object):
         For Log, Tanh trans, they are not dependent on the feature vectors
         """
         self.cConfig.trans(self.mapFeatures)
-    
+        self.cConfig.trans_others(self.mapOthers)
+
     def _getArrays(self):
         """
         Need to specify the name
@@ -307,7 +308,6 @@ class Ntuple(object):
         self.vTarget = self.cConfig.target_vec(self.mapFeatures)
         self.vWeight = self.mapWeights[self.cConfig.weights[-1]]
         self.vOthers = self.cConfig.other_vec(self.mapOthers)
-        self.cConfig.class_balance(self.vWeight, self.vTarget, 0.025, 20)
 
     def feature_vec(self):
         return self.vFeatures
@@ -349,6 +349,15 @@ class InputArrays(object):
 
     def other_vec(self):
         return self._o_vec
+
+    def class_balance(self, weights):
+        for i, w in enumerate(weights):
+            print(i, w)
+            self._w_vec[self._t_vec==i] = self._w_vec[self._t_vec==i] * w
+        return self
+
+    def class_balance_basic(self):
+        return self.class_balance([torch.Tensor([1.0]), self._w_vec[self._t_vec==0].sum() / self._w_vec[self._t_vec==1].sum()])
 
 
 # -----------------------------------------------------------------------------
