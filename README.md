@@ -21,3 +21,8 @@ mkdir output
 python train.py
 python convert.py
 ```
+
+## input data
+```
+/scratchfs/atlas/bowenzhang/public/ntuple
+```
