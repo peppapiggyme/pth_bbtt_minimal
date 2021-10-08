@@ -79,8 +79,8 @@ def train():
     NEPOCH = 200
     BATCH_SIZE = 128
 
-    ConfigOdd = Config_GNN_Odd
-    ConfigEven = Config_GNN_Even
+    ConfigOdd = Config_DNN_Odd
+    ConfigEven = Config_DNN_Even
 
     # Odd or Even for *Training*
     lNtuplesOdd = list()
@@ -89,7 +89,7 @@ def train():
     lNtuplesTest = lNtuplesOdd  # or Even
 
     # Which NN
-    NeuralNetwork = BBTT_GNN
+    NeuralNetwork = BBTT_DNN
 
     # -------------------------------------------------------------------------
 
@@ -146,14 +146,14 @@ def train():
     # 
     lValLosses = list()
     fMinValLoss = 1e9
-    iMinValLoss = 100
-    nPatience = 5
+    iMinValLoss = 10000
+    nPatience = 10
     nPatienceCount = 5 # early stop
 
     cCriterion = nn.NLLLoss(reduction='none')
-    fLearningRate = 0.002
+    fLearningRate = 0.001
     cOptimizer = optim.Adam(cNet.parameters(), lr=fLearningRate)
-    cScheduler = optim.lr_scheduler.CosineAnnealingLR(cOptimizer, nPatience * 4)
+    cScheduler = optim.lr_scheduler.CosineAnnealingLR(cOptimizer, nPatience<<1)
 
     # Training
     for epoch in range(NEPOCH):  # loop over the dataset multiple times

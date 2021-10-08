@@ -74,6 +74,7 @@ def cached_trans_standarise():
 
     return cache
 
+
 # -----------------------------------------------------------------------------
 # helpers
 # -----------------------------------------------------------------------------
@@ -81,6 +82,7 @@ def cached_trans_standarise():
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
+
 
 # -----------------------------------------------------------------------------
 # plotting
