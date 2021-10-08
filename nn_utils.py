@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.rcParams['lines.linewidth'] = 2.0
 
+
 # -----------------------------------------------------------------------------
 # third library settings
 # -----------------------------------------------------------------------------
@@ -66,12 +67,20 @@ def cached_trans_standarise():
         b"b1_m": (12000, 5e-5), 
         b"b1_eta": (0, 0.5), 
         b"b1_phi": (0, 0.3), 
-        b"MET": (4, 2),
+        b"MET": (5, 2.5),
         b"MET_phi": (0, 0.3), 
+        b"pTHH": (5, 2.5), 
     }
 
     return cache
 
+# -----------------------------------------------------------------------------
+# helpers
+# -----------------------------------------------------------------------------
+
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
 
 # -----------------------------------------------------------------------------
 # plotting
@@ -100,4 +109,4 @@ def plotROCs(sTag, mapCurves):
     plt.ylabel('True Positive Rate')
     plt.title("ROC")  # Receiver operating characteristic
     plt.legend(loc="lower right")
-    plt.savefig(f"../output/roc_{sTag}.png")
+    plt.savefig(f"output/roc_{sTag}.png")

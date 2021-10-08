@@ -37,7 +37,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 
 # device = torch.device("cuda:0") if torch.cuda.is_available else torch.cuda("cpu")
 device = torch.device("cpu")
-print(device)
+print(f"device: {device}")
 
 # Local
 import nn_utils
@@ -55,10 +55,10 @@ def train():
     # Ntuples
     mapSigs = {
         "NonRes_1p0" : "/scratchfs/atlas/bowenzhang/ML/ntuple/NonRes_1p0.root",
+        # "NonRes_10p0" : "/scratchfs/atlas/bowenzhang/ML/ntuple/NonRes_10p0.root",
     }
 
     mapMCBkgs = {
-        # "NonRes_10p0" : "/scratchfs/atlas/bowenzhang/ML/ntuple/NonRes_10p0.root",
         "TTbar" : "/scratchfs/atlas/bowenzhang/ML/ntuple/TTbar.root", 
         "SingleTop" : "/scratchfs/atlas/bowenzhang/ML/ntuple/SingleTop.root", 
         "Zjets" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Zjets.root", 
@@ -74,10 +74,10 @@ def train():
         "Fake" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Fake.root", 
     }
 
-    # Magic variables
+    # hyper-parameters
 
-    NEPOCH = 50
-    BATCH_SIZE = 256
+    NEPOCH = 200
+    BATCH_SIZE = 128
 
     ConfigOdd = Config_GNN_Odd
     ConfigEven = Config_GNN_Even
@@ -85,8 +85,8 @@ def train():
     # Odd or Even for *Training*
     lNtuplesOdd = list()
     lNtuplesEven = list()
-    lNtuplesTrain = lNtuplesEven
-    lNtuplesTest = lNtuplesOdd
+    lNtuplesTrain = lNtuplesEven  # or Odd
+    lNtuplesTest = lNtuplesOdd  # or Even
 
     # Which NN
     NeuralNetwork = BBTT_GNN
@@ -109,7 +109,7 @@ def train():
     for sTreeName, sFileName in mapFakeBkgs.items():
         lNtuplesEven.append(Ntuple(sFileName, sTreeName, ConfigEven(CategorySB.BKG_FAKE)))
 
-    # PyTorch DataLoaders
+    # Train validation splitting
     cArrays = InputArrays(lNtuplesTrain).class_balance_basic()
     nSize = len(cArrays.weight_vec())
     fSplitVal = 0.2
@@ -118,6 +118,7 @@ def train():
     np.random.shuffle(lIndices)
     lIndicesTrain, lIndicesVal = lIndices[:nSplitVal], lIndices[nSplitVal:]
     
+    # PyTorch DataLoaders for train / validation / test datasets
     cSamplerTrain = SubsetRandomSampler(lIndicesTrain)
     cSamplerVal = SubsetRandomSampler(lIndicesVal)
     cDataset = InputDataset(cArrays)
@@ -128,10 +129,11 @@ def train():
     cDatasetTest = InputDataset(cArraysTest)
     cLoaderTest = DataLoader(cDatasetTest, batch_size=BATCH_SIZE, shuffle=True)
 
-    print(cArraysTest.weight_vec()[cArraysTest.target_vec()==0].sum())
-    print(cArraysTest.weight_vec()[cArraysTest.target_vec()==1].sum())
+    print(f"Background sum of weights: {cArraysTest.weight_vec()[cArraysTest.target_vec()==0].sum()}")
+    print(f"Signal     sum of weights: {cArraysTest.weight_vec()[cArraysTest.target_vec()==1].sum()}")
 
-    print(cArrays.feature_vec()[0])
+    print(f"Example input: {cArrays.feature_vec()[0]}")
+    print(f"Example helper variables: {cArrays.other_vec()[0]}")
 
     # NN Model
     cNet = NeuralNetwork().to(device)
@@ -142,17 +144,16 @@ def train():
     print("n Parameters to train: ", sum(p.numel() for p in cNet.parameters() if p.requires_grad))
 
     # 
-    cCriterion = nn.NLLLoss(reduction='none')
-    fLearningRate = 0.004
-    # cOptimizer = optim.SGD(cNet.parameters(), lr=0.1)
-    # cOptimizer = optim.SGD(cNet.parameters(), lr=fLearningRate, momentum=0.9, nesterov=True)
-    cOptimizer = optim.Adam(cNet.parameters(), lr=fLearningRate)
-
     lValLosses = list()
     fMinValLoss = 1e9
     iMinValLoss = 100
     nPatience = 5
-    nPatienceCount = 5
+    nPatienceCount = 5 # early stop
+
+    cCriterion = nn.NLLLoss(reduction='none')
+    fLearningRate = 0.002
+    cOptimizer = optim.Adam(cNet.parameters(), lr=fLearningRate)
+    cScheduler = optim.lr_scheduler.CosineAnnealingLR(cOptimizer, nPatience * 4)
 
     # Training
     for epoch in range(NEPOCH):  # loop over the dataset multiple times
@@ -161,8 +162,6 @@ def train():
         loss_train = 0.0
         acc_train = 0.0
         tot_train = 0.0
-        acc_train_raw = 0.0
-        tot_train_raw = 0.0
         
         loss_val = 0.0
         acc_val_BDT = 0.0
@@ -170,37 +169,26 @@ def train():
         acc_val = 0.0
         tot_val = 0.0
 
-        loss_test = 0.0
-        acc_test_BDT = 0.0
-        acc_test_PNN = 0.0
-        acc_test = 0.0
-        tot_test = 0.0
-        acc_test_raw = 0.0
-        acc_test_BDT_raw = 0.0
-        acc_test_PNN_raw = 0.0
-        tot_test_raw = 0.0
-        
         print("Train")
         for i, (x, y, w, other) in enumerate(cLoaderTrain):
             cOptimizer.zero_grad()
 
-            cScores = cNet(x, other[:,2:])
+            cScores = cNet(x)
             vPred = cScores.argmax(dim=-1)
             vLoss = cCriterion(cScores, y)
-            vLoss = vLoss.mul(w)
+            vLoss = vLoss.mul(w)  # weighted loss
             vLoss.mean().backward()
             cOptimizer.step()
+            cScheduler.step()
 
             loss_train += vLoss.sum().item()
             acc_train += (vPred == y).float().mul(w).sum()
             tot_train += w.sum()
-            acc_train_raw += (vPred == y).sum().float()
-            tot_train_raw += y.size()[0]
-        
+
         print("Validation")
         with torch.no_grad():
             for i, (x, y, w, other) in enumerate(cLoaderVal):
-                cScores = cNet(x, other[:,2:])
+                cScores = cNet(x)
                 vPred = cScores.argmax(dim=-1)
                 vLoss = cCriterion(cScores, y)
                 vLoss = vLoss.mul(w)
@@ -214,60 +202,68 @@ def train():
                 acc_val_PNN += (vPred_PNN == y).float().mul(w).sum()
                 tot_val += w.sum()
 
-            print("Test")
-            for i, (x, y, w, other) in enumerate(cLoaderTest):
-                vScores = cNet(x, other[:,2:])
-                vPred = vScores.argmax(dim=-1)
-                vLoss = cCriterion(vScores, y)
-                vLoss = vLoss.mul(w)
-
-                vPred_BDT = torch.round(other[:,0]*0.5 + 0.5).long()
-                vPred_PNN = torch.round(other[:,1]).long()
-
-                loss_test += vLoss.sum().item() 
-                acc_test += (vPred == y).float().mul(w).sum()
-                acc_test_BDT += (vPred_BDT == y).float().mul(w).sum()
-                acc_test_PNN += (vPred_PNN == y).float().mul(w).sum()
-                tot_test += w.sum()
-                acc_test_raw += (vPred == y).sum().float()
-                acc_test_BDT_raw += (vPred_BDT == y).sum().float()
-                acc_test_PNN_raw += (vPred_PNN == y).sum().float()
-                tot_test_raw += y.size()[0]
-
-        print("> Loss = Tr %.6f Va %.6f" % (100*loss_train/tot_train, 100*loss_val/tot_val),
-              ", Acc = Tr %.6f Va %.6f" % (100*acc_train/tot_train, 100*acc_val/tot_val),
-              ", Acc BDT = Va %.6f" % (100*acc_val_BDT/tot_val),
-              ", Acc PNN = Va %.6f" % (100*acc_val_PNN/tot_val))
-
-        print("> Loss = Tr %.6f Te %.6f" % (100*loss_train/tot_train, 100*loss_test/tot_test),
-              ", Acc = Tr %.6f Te %.6f" % (100*acc_train/tot_train, 100*acc_test/tot_test),
-              ", Acc BDT = Te %.6f" % (100*acc_test_BDT/tot_test),
-              ", Acc PNN = Te %.6f" % (100*acc_test_PNN/tot_test))
-
-        print("> Loss = Tr %.6f Te %.6f" % (100*loss_train/tot_train, 100*loss_test/tot_test),
-              ", Acc RAW = Tr %.6f Te %.6f" % (100*acc_train_raw/tot_train_raw, 100*acc_test_raw/tot_test_raw),
-              ", Acc BDT RAW = Te %.6f" % (100*acc_test_BDT_raw/tot_test_raw),
-              ", Acc PNN RAW = Te %.6f" % (100*acc_test_PNN_raw/tot_test_raw))
+        print("> Loss = Tr %.6f Va %.6f" % (100 * loss_train / tot_train, 100 * loss_val / tot_val),
+              ", Acc = Tr %.6f Va %.6f" % (100 * acc_train / tot_train, 100 * acc_val / tot_val),
+              ", Acc BDT = Va %.6f" % (100 * acc_val_BDT / tot_val),
+              ", Acc PNN500 = Va %.6f" % (100 * acc_val_PNN / tot_val))
 
         if loss_val < fMinValLoss:
             fMinValLoss = loss_val
             iMinValLoss = len(lValLosses)
+            nPatienceCount = nPatience
         else:
             nPatienceCount -= 1
 
-        if nPatienceCount == 0:
-            fLearningRate = fLearningRate * 0.5
-            nPatienceCount = nPatience
-
         lValLosses.append(loss_val)
 
-        print ("> Current LR = %.6f, Minimal loss at epoch %d" % (fLearningRate, iMinValLoss))
+        print ("> Current LR = %.6f, Minimal loss at epoch %d" % (nn_utils.get_lr(cOptimizer), iMinValLoss))
+        torch.save(cNet.state_dict(), f"output/model-{epoch}.pt")
+
+        if nPatienceCount == 0:
+            print ("Returning...")
+            break
 
     print('Finished Training')
 
+    with torch.no_grad():
+        print("Test")
+        
+        # load the best model
+        cNet.load_state_dict(torch.load(f"output/model-{iMinValLoss}.pt"))
+
+        loss = 0.0
+        acc_BDT = 0.0
+        acc_PNN = 0.0
+        acc = 0.0
+        tot = 0.0
+
+        for i, (x, y, w, other) in enumerate(cLoaderTest):
+            vScores = cNet(x)
+            vPred = vScores.argmax(dim=-1)
+            vLoss = cCriterion(vScores, y)
+            vLoss = vLoss.mul(w)
+
+            vPred_BDT = torch.round(other[:,0]*0.5 + 0.5).long()
+            vPred_PNN = torch.round(other[:,1]).long()
+
+            loss += vLoss.sum().item() 
+            acc += (vPred == y).float().mul(w).sum()
+            acc_BDT += (vPred_BDT == y).float().mul(w).sum()
+            acc_PNN += (vPred_PNN == y).float().mul(w).sum()
+            tot += w.sum()
+
+        print("> Loss = Test %.6f" % (100 * loss / tot), 
+              ", Acc = Test %.6f" % (100 * acc / tot),
+              ", Acc BDT = Test %.6f" % (100 * acc_BDT / tot), 
+              ", Acc PNN500 = Test %.6f" % (100 * acc_PNN / tot))
+
     # Plotting ROC
     with torch.no_grad():
-        cScores = cNet(cArraysTest.feature_vec(), cArraysTest.other_vec()[:,2:])
+
+        # load the best model
+        cNet.load_state_dict(torch.load(f"output/model-{iMinValLoss}.pt"))
+        
+        cScores = cNet(cArraysTest.feature_vec())
         cScoresSignal = cScores[:,1]
         y = cArraysTest.target_vec()
         w = cArraysTest.weight_vec()

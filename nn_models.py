@@ -10,6 +10,8 @@ import nn_utils
 
 nn_utils.seed_everything(42)
 
+
+# Simplest toy DNN model
 class BBTT_DNN(nn.Module):
     def __init__(self, nIn=5, nHidden=32):
         super().__init__()
@@ -25,12 +27,18 @@ class BBTT_DNN(nn.Module):
         x = F.log_softmax(self.hidden_3(x), dim=1)
         return x
 
+
+# Helpers for GNN model
 class GNNLayer(nn.Module):
     def __init__(self, nIn, nOut):
         super().__init__()
         self.projection_0 = nn.Linear(nIn, nOut)
         self.projection_1 = nn.Linear(nOut, nOut)
         self.projection_2 = nn.Linear(nOut, nOut)
+
+        nn.init.xavier_uniform_(self.projection_0.weight.data, gain=1.414)
+        nn.init.xavier_uniform_(self.projection_1.weight.data, gain=1.414)
+        nn.init.xavier_uniform_(self.projection_2.weight.data, gain=1.414)
     
     def forward(self, node, adj):
         """
@@ -108,8 +116,9 @@ class GAttentionLayer(nn.Module):
         return node
 
 
+# Simplest toy GNN model
 class BBTT_GNN(nn.Module):
-    def __init__(self, nIn=3, nHidden=8):
+    def __init__(self, nIn=3, nHidden=[8, 16, 16, 16, 16]):
         super().__init__()
 
         # #    H  H  t  t  b  b  MET
@@ -133,25 +142,16 @@ class BBTT_GNN(nn.Module):
             [0, 1, 0, 0, 1, 1],  # b
         ])
 
-        self.hl_0 = nn.Linear(5, nHidden)
-        self.hl_1 = nn.Linear(nHidden, nHidden)
-        self.hl_2 = nn.Linear(nHidden, nHidden)
-        self.hl_3 = nn.Linear(nHidden, nHidden)
+        self.gnn_0 = GNNLayer(nIn, nHidden[0])
+        self.gnn_1 = GNNLayer(nHidden[0], nHidden[1])
+        self.gnn_2 = GNNLayer(nHidden[1], nHidden[2])
+        self.gnn_3 = GNNLayer(nHidden[2], nHidden[2])
+        self.gnn_final = nn.Linear(nHidden[2]*self.adj.size(0), nHidden[3])
 
-        self.gnn_0 = GNNLayer(nIn, nHidden)
-        self.gnn_1 = GNNLayer(nHidden, nHidden)
-        self.gnn_2 = GNNLayer(nHidden, nHidden)
-        self.gnn_3 = GNNLayer(nHidden, nHidden)
-        self.gnn_final = nn.Linear(nHidden*self.adj.size(0), nHidden)
+        self.fc_0 = nn.Linear(nHidden[3], nHidden[4])
+        self.fc_1 = nn.Linear(nHidden[4], 2)
 
-        self.fc_0 = nn.Linear(nHidden*2, nHidden*2)
-        self.fc_1 = nn.Linear(nHidden*2, 2)
-
-    def forward(self, x, o):
-        o = F.leaky_relu(self.hl_0(o), 0.01)
-        o = F.leaky_relu(self.hl_1(o), 0.01)
-        o = F.leaky_relu(self.hl_2(o), 0.01)
-        o = F.leaky_relu(self.hl_3(o), 0.01)
+    def forward(self, x):
         
         x = F.leaky_relu(self.gnn_0(x, self.adj), 0.01)
         x = F.leaky_relu(self.gnn_1(x, self.adj), 0.01)
@@ -159,13 +159,13 @@ class BBTT_GNN(nn.Module):
         x = F.leaky_relu(self.gnn_3(x, self.adj), 0.01)
         x = torch.flatten(x, start_dim=1)
         x = F.leaky_relu(self.gnn_final(x), 0.01)
-
-        x = F.leaky_relu(self.fc_0(torch.cat([x,o], dim=1)), 0.01)
+        x = F.leaky_relu(self.fc_0(x), 0.01)
         x = F.log_softmax(self.fc_1(x), dim=1)
 
         return x
 
 
+# Simplest toy GATNN model
 class BBTT_GATNN(nn.Module):
     def __init__(self, nIn=3, nHidden=8):
         super().__init__()

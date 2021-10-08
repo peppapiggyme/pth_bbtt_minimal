@@ -4,12 +4,13 @@ o------o
 o------o
 
 * Use uproot to retrieve numpy arrays from ROOT flat ntuples
+* uproot version = 3.x, this is deprecated but uproot4 api is similar
 
 o------o
 | TODO |
 o------o
 
-* No RAM optimisation, hope there's magic behind numpy, very likely wasting memories
+* No optimisation for array caching, also assuming infinite RAM 
 
 
 """
@@ -189,7 +190,7 @@ class Config_GNN(Config):
         ]
         self.weights = [b"weight"]
         self.selVars = [b"is_sr", b"is_fake_cr", b"event_number"]
-        self.others = [b"SMBDT", B"PNN500", b"mHH", b"mMMC", b"mBB", b"dRTauTau", b"dRBB"]
+        self.others = [b"SMBDT", B"PNN500", b"mHH", b"mMMC", b"mBB", b"dRTauTau", b"dRBB"] #, b"MET", b"MET_phi", b"pTHH"]
     
     def sel_vec(self, mapSelVars):
         if self.category == CategorySB.BKG_FAKE:
@@ -211,12 +212,14 @@ class Config_GNN(Config):
 
     def trans(self, mapFeatures):
         for sFeature in self.features:
-            if sFeature.endswith(b"_pt") or sFeature == b"MET":
+            if sFeature.endswith(b"_pt") or sFeature == b"MET" or sFeature.startswith(b"pT"):
                 mapFeatures[sFeature] = np.log10(mapFeatures[sFeature])
         self.trans_standarize(mapFeatures, True)
 
     def trans_others(self, mapOthers):
         for sOther in self.others[2:]:
+            if sOther.endswith(b"_pt") or sOther == b"MET" or sOther.startswith(b"pT"):
+                mapOthers[sOther] = np.log10(mapOthers[sOther])
             fOffSet, fScale = nn_utils.cached_trans_standarise()[sOther]
             mapOthers[sOther] = np.multiply(np.subtract(mapOthers[sOther], fOffSet), fScale)
 
@@ -352,7 +355,6 @@ class InputArrays(object):
 
     def class_balance(self, weights):
         for i, w in enumerate(weights):
-            print(i, w)
             self._w_vec[self._t_vec==i] = self._w_vec[self._t_vec==i] * w
         return self
 
