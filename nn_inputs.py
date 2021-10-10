@@ -310,12 +310,12 @@ class InputDataset(Dataset):
 
 def unit_test():
     mapSigs = {
-        "NonRes_1p0" : "/scratchfs/atlas/bowenzhang/ML/ntuple/NonRes_1p0.root",
+        "NonRes_1p0" : "/scratchfs/atlas/bowenzhang/public/ntuple/NonRes_1p0.root",
     }
 
     mapBkgs = {
-        "TTbar" : "/scratchfs/atlas/bowenzhang/ML/ntuple/TTbar.root", 
-        "Zjets" : "/scratchfs/atlas/bowenzhang/ML/ntuple/Zjets.root", 
+        "TTbar" : "/scratchfs/atlas/bowenzhang/public/ntuple/TTbar.root", 
+        "Zjets" : "/scratchfs/atlas/bowenzhang/public/ntuple/Zjets.root", 
     }
 
     lNtuples = list()
