@@ -47,6 +47,8 @@ nn_utils.seed_everything(42)
 from nn_inputs import *
 from nn_models import *
 
+BASE_PATH = "/scratchfs/atlas/bowenzhang/ML/ntuple_v2"
+
 
 def train():
 
@@ -54,24 +56,24 @@ def train():
 
     # Ntuples
     mapSigs = {
-        "NonRes_1p0" : "/scratchfs/atlas/bowenzhang/public/ntuple/NonRes_1p0.root",
-        # "NonRes_10p0" : "/scratchfs/atlas/bowenzhang/public/ntuple/NonRes_10p0.root",
+        # "NonRes_1p0" : f"{BASE_PATH}/NonRes_1p0.root",
+        "NonRes_10p0" : f"{BASE_PATH}/NonRes_10p0.root",
     }
 
     mapMCBkgs = {
-        "TTbar" : "/scratchfs/atlas/bowenzhang/public/ntuple/TTbar.root", 
-        "SingleTop" : "/scratchfs/atlas/bowenzhang/public/ntuple/SingleTop.root", 
-        "Zjets" : "/scratchfs/atlas/bowenzhang/public/ntuple/Zjets.root", 
-        "Wjets" : "/scratchfs/atlas/bowenzhang/public/ntuple/Wjets.root", 
-        "Diboson" : "/scratchfs/atlas/bowenzhang/public/ntuple/Diboson.root", 
-        "ttV" : "/scratchfs/atlas/bowenzhang/public/ntuple/ttV.root", 
-        "ttH" : "/scratchfs/atlas/bowenzhang/public/ntuple/ttH.root", 
-        "VH" : "/scratchfs/atlas/bowenzhang/public/ntuple/VH.root", 
-        "Htautau" : "/scratchfs/atlas/bowenzhang/public/ntuple/Htautau.root", 
+        "TTbar" : f"{BASE_PATH}/TTbar.root", 
+        "SingleTop" : f"{BASE_PATH}/SingleTop.root", 
+        "Zjets" : f"{BASE_PATH}/Zjets.root", 
+        "Wjets" : f"{BASE_PATH}/Wjets.root", 
+        "Diboson" : f"{BASE_PATH}/Diboson.root", 
+        "ttV" : f"{BASE_PATH}/ttV.root", 
+        "ttH" : f"{BASE_PATH}/ttH.root", 
+        "VH" : f"{BASE_PATH}/VH.root", 
+        "Htautau" : f"{BASE_PATH}/Htautau.root", 
     }
 
     mapFakeBkgs = {
-        "Fake" : "/scratchfs/atlas/bowenzhang/public/ntuple/Fake.root", 
+        "Fake" : f"{BASE_PATH}/Fake.root", 
     }
 
     # hyper-parameters
